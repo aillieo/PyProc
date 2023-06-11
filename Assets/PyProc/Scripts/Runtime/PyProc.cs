@@ -1,3 +1,9 @@
+// -----------------------------------------------------------------------
+// <copyright file="PyProc.cs" company="AillieoTech">
+// Copyright (c) AillieoTech. All rights reserved.
+// </copyright>
+// -----------------------------------------------------------------------
+
 namespace AillieoUtils
 {
     using System;
@@ -6,9 +12,13 @@ namespace AillieoUtils
     using System.IO;
     using System.Net;
     using System.Net.Sockets;
+    using System.Security.Cryptography;
     using System.Threading;
     using System.Threading.Tasks;
 
+    /// <summary>
+    /// The PyProc class is a C# class for starting a Python script and communicating with it.
+    /// </summary>
     public class PyProc : IDisposable
     {
         private readonly Process process;
@@ -23,7 +33,21 @@ namespace AillieoUtils
 
         private bool disposed;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PyProc"/> class using the default Python interpreter to start the specified Python script.
+        /// </summary>
+        /// <param name="pythonScriptPath">The path to the Python script to start.</param>
         public PyProc(string pythonScriptPath)
+            : this("python", pythonScriptPath)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PyProc"/> class using the specified Python interpreter to start the specified Python script.
+        /// </summary>
+        /// <param name="pythonExecutable">The path to the Python interpreter to use.</param>
+        /// <param name="pythonScriptPath">The path to the Python script to start.</param>
+        public PyProc(string pythonExecutable, string pythonScriptPath)
         {
             this.cancellationTokenSource = new CancellationTokenSource();
             this.dataQueue = new ConcurrentQueue<string>();
@@ -32,9 +56,16 @@ namespace AillieoUtils
             this.listener.Start();
             var port = ((IPEndPoint)this.listener.LocalEndpoint).Port;
 
-            this.StartAcceptingConnectionsAsync().Await();
+            var keyBytes = new byte[128];
+            using (RandomNumberGenerator rng = new RNGCryptoServiceProvider())
+            {
+                rng.GetBytes(keyBytes);
+            }
 
-            var startInfo = new ProcessStartInfo("python", $"{pythonScriptPath} {port}")
+            var key = Convert.ToBase64String(keyBytes);
+
+            this.StartAcceptingConnectionsAsync(keyBytes).Await();
+            var startInfo = new ProcessStartInfo(pythonExecutable, $"{pythonScriptPath} {port} {key}")
             {
                 UseShellExecute = false,
                 RedirectStandardInput = true,
@@ -53,17 +84,34 @@ namespace AillieoUtils
             this.process.BeginErrorReadLine();
         }
 
+        /// <summary>
+        /// Finalizes an instance of the <see cref="PyProc"/> class.
+        /// </summary>
         ~PyProc()
         {
             this.Dispose(false);
         }
 
+        /// <summary>
+        /// Event that is invoked when data is received from the Python script.
+        /// </summary>
         public event Action<string> OnData;
 
+        /// <summary>
+        /// Event that is invoked when data is received from the standard output stream of the Python script.
+        /// </summary>
         public event Action<string> OnOutput;
 
+        /// <summary>
+        /// Event that is invoked when data is received from the standard error stream of the Python script.
+        /// </summary>
         public event Action<string> OnError;
 
+        /// <summary>
+        /// Sends data to the Python script.
+        /// </summary>
+        /// <param name="data">The data to send.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
         public async Task SendAsync(string data)
         {
             if (this.writer != null)
@@ -76,19 +124,32 @@ namespace AillieoUtils
             }
         }
 
+        /// <inheritdoc/>
         public void Dispose()
         {
             this.Dispose(disposing: true);
             GC.SuppressFinalize(this);
         }
 
-        private async Task StartAcceptingConnectionsAsync()
+        private async Task StartAcceptingConnectionsAsync(byte[] keyBytes)
         {
             while (!this.cancellationTokenSource.IsCancellationRequested)
             {
                 try
                 {
-                    this.client = await this.listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    var rawClient = await this.listener.AcceptTcpClientAsync();
+                    var valid = await this.Handshake(rawClient, keyBytes);
+                    if (!valid)
+                    {
+                        continue;
+                    }
+
+                    if (this.client != null)
+                    {
+                        break;
+                    }
+
+                    this.client = rawClient;
                     this.stream = this.client.GetStream();
                     this.reader = new StreamReader(this.stream);
                     this.writer = new StreamWriter(this.stream) { AutoFlush = true };
@@ -96,10 +157,12 @@ namespace AillieoUtils
                     // Send any queued data to the new client
                     while (this.dataQueue.TryDequeue(out var data))
                     {
-                        await this.writer.WriteLineAsync(data).ConfigureAwait(false);
+                        this.writer.WriteLineAsync(data).Await();
                     }
 
                     this.StartReadingDataAsync().Await();
+
+                    break;
                 }
                 catch (ObjectDisposedException e) when (e.ObjectName == typeof(Socket).FullName)
                 {
@@ -116,6 +179,25 @@ namespace AillieoUtils
             }
 
             this.listener.Stop();
+        }
+
+        private async Task<bool> Handshake(TcpClient rawClient, byte[] key)
+        {
+            var stream = rawClient.GetStream();
+
+            var keyBuffer = new byte[key.Length];
+            await stream.ReadAsync(keyBuffer, 0, keyBuffer.Length);
+
+            for (var i = 0; i < key.Length; ++i)
+            {
+                if (key[i] != keyBuffer[i])
+                {
+                    rawClient.Close();
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private async Task StartReadingDataAsync()

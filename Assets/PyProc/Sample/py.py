@@ -1,3 +1,4 @@
+import base64
 import logging
 import socket
 import sys
@@ -11,6 +12,8 @@ port = int(sys.argv[1])
 server_address = ('localhost', port)
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     sock.connect(server_address)
+    key = sys.argv[2]
+    sock.sendall(base64.b64decode(key))
 
     while True:
         try:

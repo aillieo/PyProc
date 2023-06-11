@@ -1,3 +1,9 @@
+// -----------------------------------------------------------------------
+// <copyright file="TaskExtensions.cs" company="AillieoTech">
+// Copyright (c) AillieoTech. All rights reserved.
+// </copyright>
+// -----------------------------------------------------------------------
+
 namespace AillieoUtils
 {
     using System.Threading.Tasks;
