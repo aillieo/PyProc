@@ -77,11 +77,13 @@ namespace AillieoUtils
 
             this.process.Start();
 
-            this.process.OutputDataReceived += (s, e) => this.OnOutput?.Invoke(e.Data);
+            this.process.OutputDataReceived += this.OnOutputDataReceived;
             this.process.BeginOutputReadLine();
 
-            this.process.ErrorDataReceived += (s, e) => this.OnError?.Invoke(e.Data);
+            this.process.ErrorDataReceived += this.OnErrorDataReceived;
             this.process.BeginErrorReadLine();
+
+            this.process.Exited += this.OnExited;
         }
 
         /// <summary>
@@ -127,8 +129,32 @@ namespace AillieoUtils
         /// <inheritdoc/>
         public void Dispose()
         {
-            this.Dispose(disposing: true);
+            this.Dispose(true);
             GC.SuppressFinalize(this);
+        }
+
+        private void OnOutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            if (e.Data == null)
+            {
+                return;
+            }
+
+            this.OnOutput?.Invoke(e.Data);
+        }
+
+        private void OnErrorDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            if (e.Data == null)
+            {
+                return;
+            }
+
+            this.OnError?.Invoke(e.Data);
+        }
+
+        private void OnExited(object sender, EventArgs e)
+        {
         }
 
         private async Task StartAcceptingConnectionsAsync(byte[] keyBytes)
@@ -183,10 +209,10 @@ namespace AillieoUtils
 
         private async Task<bool> Handshake(TcpClient rawClient, byte[] key)
         {
-            var stream = rawClient.GetStream();
+            var rarStream = rawClient.GetStream();
 
             var keyBuffer = new byte[key.Length];
-            await stream.ReadAsync(keyBuffer, 0, keyBuffer.Length);
+            await rarStream.ReadAsync(keyBuffer, 0, keyBuffer.Length);
 
             for (var i = 0; i < key.Length; ++i)
             {

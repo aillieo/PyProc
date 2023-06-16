@@ -1,3 +1,4 @@
+using System;
 using AillieoUtils;
 using UnityEngine;
 
@@ -31,7 +32,7 @@ public class CS : MonoBehaviour
     {
         this.Destroy();
 
-        this.manager = new PyProc(System.IO.Path.Combine(Application.dataPath, "PyProc/Sample/py.py"));
+        this.manager = new PyProc(System.IO.Path.Combine(Application.dataPath, "PyProc/Sample/PythonScripts/py.py"));
 
         this.manager.OnData += UnityEngine.Debug.Log;
         this.manager.OnOutput += UnityEngine.Debug.LogWarning;
@@ -46,7 +47,17 @@ public class CS : MonoBehaviour
             return;
         }
 
-        this.manager.Dispose();
-        this.manager = null;
+        try
+        {   
+            this.manager.Dispose();
+        }
+        catch(Exception e)
+        {
+            UnityEngine.Debug.LogError(e);
+        }
+        finally
+        {
+            this.manager = null;
+        }
     }
 }
